@@ -25,7 +25,7 @@ yarn install
 ```
 
 ## Build
-To build and run a local server, execute `npx wrangler dev`.
+To build and run a local server, execute `wrangler dev`.
 
 ## License
 

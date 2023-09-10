@@ -22,7 +22,7 @@ where
     T: DeserializeOwned,
 {
     let api_base = env_var_url(env, "FIB_API_BASE")?;
-    let resource_url = api_base.join("jo/classes/")?;
+    let resource_url = api_base.join(path)?;
 
     client
         .get(resource_url)
