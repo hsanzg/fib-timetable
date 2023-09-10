@@ -48,7 +48,7 @@ async fn get_schedule(client: &Client, env: &Env) -> Result<Vec<Session>> {
 /// Merges any two consecutive sessions of the same subject
 /// for the same group.
 fn merge_consecutive_sessions(sessions: &mut Vec<Session>) {
-    // Sort sessions are sorted by weekday and start time.
+    // Sort sessions by weekday and start time.
     sessions.sort_unstable_by(|a, b| a.weekday.cmp(&b.weekday).then(a.start.cmp(&b.start)));
 
     // Filter out consecutive events, starting from the end.
