@@ -1,0 +1,15 @@
+name = "fib-timetable"
+main = "build/worker/shim.mjs"
+compatibility_date = "2023-03-22"
+
+[[kv_namespaces]]
+binding = "AUTH_KV"
+id = "8bb41760fca84f1aae2f659ae37f1766"
+preview_id = "36fdd895a83741ecb1f66c204baa3566"
+
+[vars]
+APP_BASE="https://fib-timetable.hgsg.me/"
+FIB_API_BASE="https://api.fib.upc.edu/v2/"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
