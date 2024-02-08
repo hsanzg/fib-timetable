@@ -426,7 +426,7 @@ struct Semester {
 enum SemesterKind {
     /// The fall semester, which usually starts in September.
     Fall = 1,
-    /// The spring semester, which usually starts in January.
+    /// The spring semester, which usually starts in February.
     Spring,
 }
 
@@ -592,6 +592,49 @@ mod tests {
         assert_eq!(semester.start, NaiveDate::from_ymd_opt(2023, 9, 7).unwrap());
         assert_eq!(semester.end, NaiveDate::from_ymd_opt(2023, 12, 22).unwrap());
         assert_eq!(semester.kind, SemesterKind::Fall);
+        Ok(())
+    }
+
+    #[test]
+    fn spring_semester() -> serde_json::Result<()> {
+        let events: [FibEvent; 1] = serde_json::from_str(
+            r#"[
+            {
+                "nom": "CURS",
+                "inici": "2024-02-12T00:00:00",
+                "fi": "2024-05-31T00:00:00",
+                "categoria": "ALTRES"
+            }
+        ]"#,
+        )?;
+        let exams: [Exam; 1] = serde_json::from_str(
+            r#"[
+                {
+                    "id": 30231,
+                    "assig": "AGT-MIRI",
+                    "codi_upc": "270614",
+                    "aules": "",
+                    "inici": "2024-04-08T13:00:00",
+                    "fi": "2024-04-08T15:00:00",
+                    "quatr": 2,
+                    "curs": 2023,
+                    "pla": "MIRI",
+                    "tipus": "P",
+                    "comentaris": "",
+                    "eslaboratori": ""
+                }
+            ]"#,
+        )?;
+
+        let date = NaiveDate::from_ymd_opt(2024, 2, 8).unwrap();
+        let semester = Semester::at(date, &events, &exams);
+
+        assert_eq!(
+            semester.start,
+            NaiveDate::from_ymd_opt(2024, 2, 12).unwrap()
+        );
+        assert_eq!(semester.end, NaiveDate::from_ymd_opt(2024, 5, 31).unwrap());
+        assert_eq!(semester.kind, SemesterKind::Spring);
 
         Ok(())
     }
