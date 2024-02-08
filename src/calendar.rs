@@ -1,13 +1,15 @@
-use crate::env_var_url;
+use std::collections::HashMap;
+use std::iter::Peekable;
+use std::ops::AddAssign;
+
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc, Weekday};
 use icalendar::{Calendar, Component, Event, EventLike};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::iter::Peekable;
-use std::ops::AddAssign;
 use worker::*;
+
+use crate::env_var_url;
 
 /// The FIB API "Schedule" response contents.
 #[derive(Debug, Deserialize)]
@@ -107,7 +109,7 @@ struct ExamsResponse {
 /// Fetches all scheduled exams for the semester starting at
 /// or during the given date from the FIB API, including
 /// those the current user is not taking.
-async fn get_exams(client: &Client, env: &Env, date: &NaiveDate) -> Result<Vec<Exam>> {
+async fn get_exams(client: &Client, env: &Env, date: NaiveDate) -> Result<Vec<Exam>> {
     let semester_kind = SemesterKind::at(date);
     let course_year = match semester_kind {
         SemesterKind::Fall => date.year(),
@@ -147,7 +149,7 @@ pub async fn export_calendar(client: &Client, env: &Env) -> Result<Response> {
     // is taking.
     let now = Utc::now().date_naive();
     let mut calendar = Calendar::new();
-    let exams: Vec<Exam> = get_exams(client, env, &now)
+    let exams: Vec<Exam> = get_exams(client, env, now)
         .await?
         .into_iter()
         // Ignore all exams the user doesn't need to take.
@@ -174,7 +176,7 @@ pub async fn export_calendar(client: &Client, env: &Env) -> Result<Response> {
     // so we must determine the first and last day of class, and skip
     // every holiday listed in the calendar within that range.
     let events = get_events(client, env).await?;
-    let semester = Semester::at(&now, &events, &exams);
+    let semester = Semester::at(now, &events, &exams);
 
     for weekday in WEEKDAYS {
         // Find all course sessions that regularly take place on `weekday`.
@@ -432,7 +434,7 @@ enum SemesterKind {
 impl SemesterKind {
     /// Returns the type of the semester beginning after or
     /// in progress during the given date.
-    pub fn at(date: &NaiveDate) -> Self {
+    pub fn at(date: NaiveDate) -> Self {
         match date.month() {
             8..=12 => Self::Fall,
             1..=7 => Self::Spring,
@@ -441,11 +443,19 @@ impl SemesterKind {
     }
 }
 
+/// Returns the first calendar date not before `date` falling on a [Monday].
+///
+/// [Monday]: `Weekday::Mon`
+fn first_monday_after(date: NaiveDate) -> NaiveDate {
+    date.iter_days()
+        .find(|d| d.weekday() == Weekday::Mon)
+        .expect("next Monday is after the last representable date")
+}
+
 impl Semester {
-    /// Returns the semester beginning after or in progress
-    /// during the given date, taking into account the FIB
-    /// calendar events and scheduled exams.
-    pub fn at(date: &NaiveDate, events: &[FibEvent], exams: &[Exam]) -> Self {
+    /// Returns the semester beginning after or in progress during the given date,
+    /// taking into account the FIB calendar events and scheduled exams.
+    pub fn at(date: NaiveDate, events: &[FibEvent], exams: &[Exam]) -> Self {
         let kind = SemesterKind::at(date);
         let midterms_period = exams
             .iter()
@@ -455,36 +465,43 @@ impl Semester {
             .reduce(|acc, (s, e)| (acc.0.min(s), acc.1.max(e)))
             .expect("`exams` should contain at least one exam in the current period");
 
-        let (start, end) = match kind {
-            SemesterKind::Fall => {
-                // The "CURS" FIB event specifies the period of the first semester.
-                if let Some(semester) = events
-                    .iter()
-                    .find(|&e| e.start.year() == date.year() && e.name == "CURS")
-                {
-                    (semester.start.date(), semester.end.date())
-                } else {
+        // The "CURS" FIB event specifies the period of the semester.
+        let (start, end) = if let Some(semester) = events
+            .iter()
+            .find(|&e| e.start.year() == date.year() && e.name == "CURS")
+        {
+            (semester.start.date(), semester.end.date())
+        } else {
+            // The calendar doesn't specify the class period yet; take some sane
+            // default dates.
+            match kind {
+                SemesterKind::Fall => (
+                    first_monday_after(NaiveDate::from_ymd_opt(date.year(), 9, 4).unwrap()),
+                    NaiveDate::from_ymd_opt(date.year(), 12, 24).unwrap(),
+                ),
+                SemesterKind::Spring => {
+                    // Assume the class period begins on the first Monday after
+                    // the end of the spring semester enrollment window.
+                    let enrollment_end = events
+                        .iter()
+                        .find(|&e| {
+                            e.start.year() == date.year()
+                                && e.name == "INSCRIPCIO-INSTANCIES-CANVI-MATRICULA"
+                        })
+                        .map(|e| e.start.date())
+                        .unwrap_or_else(|| NaiveDate::from_ymd_opt(date.year(), 2, 11).unwrap());
+                    // Take the end of the class period to be one week before
+                    // the first final exam, if any.
+                    let first_final = exams
+                        .iter()
+                        .map(|e| e.start.date())
+                        .find(|d| d.month() == 6)
+                        .unwrap_or_else(|| NaiveDate::from_ymd_opt(date.year(), 5, 31).unwrap());
                     (
-                        NaiveDate::from_ymd_opt(date.year(), 9, 4).unwrap(),
-                        NaiveDate::from_ymd_opt(date.year(), 12, 25).unwrap(),
+                        first_monday_after(enrollment_end),
+                        first_final - Duration::days(7),
                     )
                 }
-            }
-            SemesterKind::Spring => {
-                let start = events
-                    .iter()
-                    .find(|&e| e.start.year() == date.year() && e.name == "FI-EXAMENS")
-                    .map(|e| e.start.date() + Duration::days(1))
-                    .unwrap_or_else(|| NaiveDate::from_ymd_opt(date.year(), 1, 20).unwrap());
-                // The API nor the calendar expose the last day of class, so
-                // take the end of the class period one week before the first
-                // final exam.
-                let first_final = exams
-                    .iter()
-                    .map(|e| e.start.date())
-                    .find(|d| d.month() == 6)
-                    .unwrap_or_else(|| NaiveDate::from_ymd_opt(date.year(), 6, 10).unwrap());
-                (start, first_final - Duration::days(7))
             }
         };
         Self {
@@ -498,10 +515,11 @@ impl Semester {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{Duration, NaiveDate, NaiveTime, Weekday};
+
     use crate::calendar::{
         ClassDateIterator, Exam, FibEvent, Hours, RawWeekday, Semester, SemesterKind, Session,
     };
-    use chrono::{Duration, NaiveDate, NaiveTime, Weekday};
 
     #[test]
     fn parse_session() -> serde_json::Result<()> {
@@ -530,11 +548,11 @@ mod tests {
     #[test]
     fn semester_kind() {
         assert_eq!(
-            SemesterKind::at(&NaiveDate::from_ymd_opt(2023, 8, 5).unwrap()),
+            SemesterKind::at(NaiveDate::from_ymd_opt(2023, 8, 5).unwrap()),
             SemesterKind::Fall
         );
         assert_eq!(
-            SemesterKind::at(&NaiveDate::from_ymd_opt(2024, 3, 7).unwrap()),
+            SemesterKind::at(NaiveDate::from_ymd_opt(2024, 3, 7).unwrap()),
             SemesterKind::Spring
         );
     }
@@ -570,7 +588,7 @@ mod tests {
         )?;
 
         let date = NaiveDate::from_ymd_opt(2023, 10, 1).unwrap();
-        let semester = Semester::at(&date, &events, &exams);
+        let semester = Semester::at(date, &events, &exams);
 
         assert_eq!(semester.start, NaiveDate::from_ymd_opt(2023, 9, 7).unwrap());
         assert_eq!(semester.end, NaiveDate::from_ymd_opt(2023, 12, 22).unwrap());
