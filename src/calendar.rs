@@ -216,8 +216,7 @@ pub async fn export_calendar(client: &Client, env: &Env) -> Result<Response> {
     Ok(response.with_headers(headers))
 }
 
-/// An iterator over the days within a [`Semester`]
-/// in which the FIB has lectures.
+/// An iterator over the days within a [`Semester`] in which the FIB has lectures.
 struct ClassDateIterator<'a, I>
 where
     I: Iterator<Item = &'a FibEvent>,
@@ -646,6 +645,45 @@ mod tests {
             Some(NaiveDate::from_ymd_opt(2023, 10, 9).unwrap())
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_days_holiday() -> serde_json::Result<()> {
+        let semester = Semester {
+            start: NaiveDate::from_ymd_opt(2024, 2, 12).unwrap(),
+            end: NaiveDate::from_ymd_opt(2024, 5, 31).unwrap(),
+            kind: SemesterKind::Spring,
+            midterms_period: (
+                NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
+            ),
+        };
+        let events: [FibEvent; 1] = serde_json::from_str(
+            r#"[
+            {
+                "nom": "FESTIU",
+                "inici": "2024-02-27T00:00:00",
+                "fi": "2024-02-29T00:00:00",
+                "categoria": "CALENDARI"
+            }
+        ]"#,
+        )?;
+        let mut iter = ClassDateIterator::new(&semester, Weekday::Thu, events.iter());
+
+        assert_eq!(
+            iter.next(),
+            Some(NaiveDate::from_ymd_opt(2024, 2, 15).unwrap())
+        );
+        assert_eq!(
+            iter.next(),
+            Some(NaiveDate::from_ymd_opt(2024, 2, 22).unwrap())
+        );
+        // The iterator needs to skip over 2023-02-29, because it is a holiday.
+        assert_eq!(
+            iter.next(),
+            Some(NaiveDate::from_ymd_opt(2024, 3, 7).unwrap())
+        );
         Ok(())
     }
 
