@@ -254,7 +254,7 @@ checksum = "6999dc1837253364c2ebb0704ba97994bd874e8f195d665c50b7548f6ea92764"
 
 [[package]]
 name = "fib-timetable"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "icalendar",
@@ -527,9 +527,9 @@ dependencies = [
 
 [[package]]
 name = "icalendar"
-version = "0.15.7"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "753f71e82c28fb469f0d813019eea1caaf4e8064b1e3822556f5b6278c2869a4"
+checksum = "aa4ffbcf3325ae94554c5259ce0b8907d37133c066cb3d424a2fa96aa1f10088"
 dependencies = [
  "chrono",
  "iso8601",
