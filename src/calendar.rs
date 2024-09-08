@@ -156,7 +156,9 @@ pub async fn export_calendar(client: &Client, env: &Env) -> Result<Response> {
         .filter(|e| subject_names.contains_key(&e.subject))
         .collect();
     for exam in &exams {
-        let subject_name = &subject_names[&exam.subject];
+        let subject_name = subject_names
+            .get(&exam.subject)
+            .expect("subject of exam should be taken");
         let summary = format!("Exam on {subject_name}");
         let location = if exam.rooms.is_empty() {
             "Unknown room".to_string()
@@ -192,7 +194,7 @@ pub async fn export_calendar(client: &Client, env: &Env) -> Result<Response> {
                 // on `date`.
                 let subject = subject_names
                     .get(&session.subject)
-                    .expect("schedule should only have sessions of taken courses");
+                    .expect("schedule should have sessions of taken courses only");
                 let start = date.and_time(session.start);
                 let location = if session.room.is_empty() {
                     "Unknown room".to_string()
@@ -266,9 +268,10 @@ where
         if self.cur <= self.end {
             // Check `cur` does not fall in the period for midterm exams,
             // in which no classes are scheduled.
-            let (mid_start, mid_end) = self.semester.midterms_period;
-            if mid_start <= self.cur && self.cur <= mid_end {
-                return self.next(); // see if this period is over by next week.
+            if let Some((mid_start, mid_end)) = self.semester.midterms_period {
+                if mid_start <= self.cur && self.cur <= mid_end {
+                    return self.next(); // see if this period is over by next week.
+                }
             }
 
             // Check whether `cur` is a holiday by advancing the event
@@ -416,8 +419,8 @@ struct Semester {
     /// The type of the academic semester.
     kind: SemesterKind,
     /// The date period when midterm exams take place (and thus no classes
-    /// are scheduled), both inclusive.
-    midterms_period: (NaiveDate, NaiveDate),
+    /// are scheduled), both inclusive. [`None`] if unknown.
+    midterms_period: Option<(NaiveDate, NaiveDate)>,
 }
 
 /// The type of academic term.
@@ -456,13 +459,14 @@ impl Semester {
     /// taking into account the FIB calendar events and scheduled exams.
     pub fn at(date: NaiveDate, events: &[FibEvent], exams: &[Exam]) -> Self {
         let kind = SemesterKind::at(date);
+        // If `exams` does not contain a nonfinal exam in the current period,
+        // we cannot determine the start and end date of the midterms season.
         let midterms_period = exams
             .iter()
             .map(|e| (e.start.date(), e.end.date()))
             .filter(|(s, _)| s.month() != 1 && s.month() != 6) // ignore finals
             .filter(|(s, _)| s.year() == date.year()) // only midterms in semester
-            .reduce(|acc, (s, e)| (acc.0.min(s), acc.1.max(e)))
-            .expect("`exams` should contain at least one exam in the current period");
+            .reduce(|acc, (s, e)| (acc.0.min(s), acc.1.max(e)));
 
         // The "CURS" FIB event specifies the period of the semester.
         let (start, end) = if let Some(semester) = events
@@ -645,10 +649,10 @@ mod tests {
             start: NaiveDate::from_ymd_opt(2023, 9, 7).unwrap(),
             end: NaiveDate::from_ymd_opt(2023, 10, 20).unwrap(),
             kind: SemesterKind::Fall,
-            midterms_period: (
+            midterms_period: Some((
                 NaiveDate::from_ymd_opt(2023, 10, 11).unwrap(),
                 NaiveDate::from_ymd_opt(2023, 10, 15).unwrap(),
-            ),
+            )),
         };
         let events: [FibEvent; 3] = serde_json::from_str(
             r#"[
@@ -697,10 +701,10 @@ mod tests {
             start: NaiveDate::from_ymd_opt(2024, 2, 12).unwrap(),
             end: NaiveDate::from_ymd_opt(2024, 5, 31).unwrap(),
             kind: SemesterKind::Spring,
-            midterms_period: (
+            midterms_period: Some((
                 NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
                 NaiveDate::from_ymd_opt(2024, 4, 8).unwrap(),
-            ),
+            )),
         };
         let events: [FibEvent; 1] = serde_json::from_str(
             r#"[
